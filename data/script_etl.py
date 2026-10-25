@@ -11,7 +11,7 @@ import yfinance as yf
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL, Engine
 
-# 1) CONFIGURAÇÃO
+# 1) CONFIGURAÇÕES GERAIS
 
 ROOT = Path(__file__).resolve().parent
 DATA_DIR = ROOT / "data"
@@ -35,3 +35,29 @@ COLUNAS = {  # nomes do Yahoo → nomes em português
     "Open": "abertura", "High": "maxima", "Low": "minima",
     "Close": "fechamento", "Adj Close": "fech_ajustado", "Volume": "volume",
 }
+
+# 2) CRIAÇÃO DAS TABELAS NO BANCO DE DADOS
+
+DDL = """
+DROP TABLE IF EXISTS fact_cotacao;
+DROP TABLE IF EXISTS dim_calendario;
+DROP TABLE IF EXISTS dim_ativo;
+DROP TABLE IF EXISTS meta_qualidade;
+CREATE TABLE dim_ativo (
+    id_ativo INTEGER PRIMARY KEY, ticker VARCHAR(10) NOT NULL UNIQUE,
+    ticker_yf VARCHAR(15) NOT NULL, empresa VARCHAR(80) NOT NULL, setor VARCHAR(60) NOT NULL);
+CREATE TABLE dim_calendario (
+    data DATE PRIMARY KEY, ano INTEGER NOT NULL, trimestre INTEGER NOT NULL,
+    mes INTEGER NOT NULL, dia_semana INTEGER NOT NULL);
+CREATE TABLE fact_cotacao (
+    id_ativo INTEGER NOT NULL REFERENCES dim_ativo(id_ativo),
+    data DATE NOT NULL REFERENCES dim_calendario(data),
+    abertura DOUBLE PRECISION, maxima DOUBLE PRECISION, minima DOUBLE PRECISION,
+    fechamento DOUBLE PRECISION, fech_ajustado DOUBLE PRECISION NOT NULL,
+    volume BIGINT, volume_financeiro DOUBLE PRECISION, retorno_diario DOUBLE PRECISION,
+    PRIMARY KEY (id_ativo, data));
+CREATE INDEX idx_fact_cotacao_data ON fact_cotacao (data);
+CREATE TABLE meta_qualidade (
+    ticker VARCHAR(10), linhas_brutas INTEGER, linhas_finais INTEGER, removidas INTEGER,
+    outliers_retorno INTEGER, data_inicio VARCHAR(10), data_fim VARCHAR(10));
+"""
