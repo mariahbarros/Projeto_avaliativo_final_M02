@@ -77,6 +77,40 @@ def extrair(ticker: str, tentativas: int = 3) -> pd.DataFrame:
             erro = "retorno vazio"
         except Exception as exc:
             erro = str(exc)
-        time.sleep(2 * n)  # espera e tenta de novo
+        time.sleep(2 * n)  
     raise RuntimeError(f"{ticker}: falha na extração ({erro})")
+
+# 4) TRATAMENTO DOS DADOS
+
+def tratar(bruto: pd.DataFrame, ticker: str) -> tuple[pd.DataFrame, dict]:
+    df = bruto.copy()
+    datas = pd.to_datetime(df.index)
+    if datas.tz is not None:
+        datas = datas.tz_localize(None)     # remove fuso horário
+    df.index = datas.normalize()
+    df.index.name = "data"
+    df = df.reset_index()[["data", *COLUNAS]].rename(columns=COLUNAS)
+    n_bruto = len(df)
+
+    df = df.drop_duplicates("data", keep="last")                       # remove duplicatas
+    for c in COLUNAS.values():
+        df[c] = pd.to_numeric(df[c], errors="coerce")                  # transforma texto em número
+    df = df[df["data"].between(pd.Timestamp(START), pd.Timestamp(END))]  # organiza período de interesse
+    df = df.dropna(subset=["fech_ajustado", "fechamento"])             # remove linhas sem fechamento
+    df = df[(df[["abertura", "maxima", "minima", "fechamento", "fech_ajustado"]] > 0).all(axis=1)]
+    df = df[df["maxima"] >= df["minima"]]                              # informações inconsistentes
+    df["volume"] = df["volume"].fillna(0).clip(lower=0).astype("int64")
+    df = df.sort_values("data").reset_index(drop=True)
+
+    df["volume_financeiro"] = df["volume"] * df["fechamento"]          # cria coluna de volume financeiro
+    df["retorno_diario"] = df["fech_ajustado"].pct_change()            # cria coluna de retorno diário (fechamento ajustado)
+
+    relatorio = {               
+        "ticker": ticker, "linhas_brutas": n_bruto, "linhas_finais": len(df),
+        "removidas": n_bruto - len(df),
+        "outliers_retorno": int((df["retorno_diario"].abs() > 0.40).sum()),  # só sinaliza
+        "data_inicio": df["data"].min().strftime("%Y-%m-%d") if len(df) else None,
+        "data_fim": df["data"].max().strftime("%Y-%m-%d") if len(df) else None,
+    }
+    return df, relatorio
 
