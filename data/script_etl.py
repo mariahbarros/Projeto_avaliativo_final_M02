@@ -156,3 +156,55 @@ def executar_etl(engine: Engine, log=print) -> list[dict]:
     carregar(engine, tabelas, meta)
     log(f"Banco gravado com {len(tabelas)} ativo(s).")
     return meta
+
+# 6) CONEXÃO E LEITURA DOS DADOS
+
+def engine_sqlite() -> Engine:
+    DATA_DIR.mkdir(exist_ok=True)
+    return create_engine(f"sqlite:///{SQLITE_PATH}")
+
+# conexão com PostgreSQL usando SQLAlchemy
+def engine_postgres(cfg: Mapping) -> Engine:
+    url = URL.create(
+        "postgresql+psycopg2", username=cfg["user"], password=cfg["password"], host=cfg["host"],
+        port=int(cfg.get("port", 5432)), database=cfg["dbname"],
+        query={"sslmode": cfg.get("sslmode", "require"), "connect_timeout": "8"},
+    )
+    engine = create_engine(url, pool_pre_ping=True)
+    with engine.connect() as conn:
+        conn.execute(text("SELECT 1"))  # falha rápido se estiver fora do ar
+    return engine
+
+# leitura das cotações do banco de dados
+QUERY_COTACOES = """
+SELECT f.data, a.ticker, a.empresa, a.setor, c.ano,
+       f.abertura, f.maxima, f.minima, f.fechamento,
+       f.fech_ajustado AS adj_close, f.volume, f.volume_financeiro
+FROM fact_cotacao f
+JOIN dim_ativo a      ON a.id_ativo = f.id_ativo
+JOIN dim_calendario c ON c.data     = f.data
+ORDER BY a.ticker, f.data
+"""
+
+def ler_cotacoes(engine: Engine) -> pd.DataFrame:
+    df = pd.read_sql(text(QUERY_COTACOES), engine)
+    df["data"] = pd.to_datetime(df["data"])
+    return df
+
+def ler_meta(engine: Engine) -> pd.DataFrame:
+    try:
+        return pd.read_sql(text("SELECT * FROM meta_qualidade ORDER BY ticker"), engine)
+    except Exception:
+        return pd.DataFrame()
+
+# 7) EXECUÇÃO DO SCRIPT
+
+if __name__ == "__main__":
+    if "--postgres" in sys.argv:
+        segredos = ROOT / ".streamlit" / "secrets.toml"
+        if not segredos.exists():
+            sys.exit("Crie .streamlit/secrets.toml com o bloco [postgres].")
+        with open(segredos, "rb") as f:
+            executar_etl(engine_postgres(tomllib.load(f)["postgres"]))
+    else:
+        executar_etl(engine_sqlite())
