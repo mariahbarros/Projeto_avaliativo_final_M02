@@ -114,3 +114,45 @@ def tratar(bruto: pd.DataFrame, ticker: str) -> tuple[pd.DataFrame, dict]:
     }
     return df, relatorio
 
+# 5) CARREGAMENTO DOS DADOS 
+
+def carregar(engine: Engine, tabelas: dict[str, pd.DataFrame], meta: list[dict]) -> None:
+    dim_ativo = pd.DataFrame(
+        [{"id_ativo": i, "ticker": t, "ticker_yf": f"{t}.SA", "empresa": ATIVOS[t][0], "setor": ATIVOS[t][1]}
+         for i, t in enumerate(tabelas, start=1)]
+    )
+    fato = pd.concat([d.assign(ticker=t) for t, d in tabelas.items()], ignore_index=True)
+    fato = fato.merge(dim_ativo[["id_ativo", "ticker"]], on="ticker")
+    datas = pd.DataFrame({"data": sorted(fato["data"].unique())})
+    dim_cal = datas.assign(ano=datas["data"].dt.year, trimestre=datas["data"].dt.quarter,
+                           mes=datas["data"].dt.month, dia_semana=datas["data"].dt.dayofweek)
+    fato = fato[["id_ativo", "data", "abertura", "maxima", "minima", "fechamento",
+                 "fech_ajustado", "volume", "volume_financeiro", "retorno_diario"]]
+
+    with engine.begin() as conn:  # transação: ou grava tudo, ou nada
+        for comando in [c.strip() for c in DDL.split(";") if c.strip()]:
+            conn.exec_driver_sql(comando)
+        dim_ativo.to_sql("dim_ativo", conn, if_exists="append", index=False)
+        dim_cal.to_sql("dim_calendario", conn, if_exists="append", index=False)
+        fato.to_sql("fact_cotacao", conn, if_exists="append", index=False, chunksize=2000)
+        pd.DataFrame(meta).to_sql("meta_qualidade", conn, if_exists="append", index=False)
+
+# execução do ETL
+def executar_etl(engine: Engine, log=print) -> list[dict]:
+    
+    tabelas, meta = {}, []
+    for ticker in ATIVOS:
+        try:
+            df, rel = tratar(extrair(ticker), ticker)
+            if df.empty:
+                raise RuntimeError("sem dados após a limpeza")
+            tabelas[ticker] = df
+            meta.append(rel)
+            log(f"OK   {ticker}: {rel['linhas_finais']} pregões ({rel['data_inicio']} → {rel['data_fim']})")
+        except Exception as exc:  
+            log(f"ERRO {ticker}: {exc}")
+    if not tabelas:
+        raise RuntimeError("Nenhum ativo pôde ser carregado.")
+    carregar(engine, tabelas, meta)
+    log(f"Banco gravado com {len(tabelas)} ativo(s).")
+    return meta
