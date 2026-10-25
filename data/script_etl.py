@@ -61,3 +61,22 @@ CREATE TABLE meta_qualidade (
     ticker VARCHAR(10), linhas_brutas INTEGER, linhas_finais INTEGER, removidas INTEGER,
     outliers_retorno INTEGER, data_inicio VARCHAR(10), data_fim VARCHAR(10));
 """
+
+# 3) EXTRAÇÃO DOS DADOS NO SITE YAHOO FINANCE
+
+def extrair(ticker: str, tentativas: int = 3) -> pd.DataFrame:
+    fim_exclusivo = (pd.Timestamp(END) + pd.Timedelta(days=1)).strftime("%Y-%m-%d")  # Yahoo: fim é exclusivo
+    erro = None
+    for n in range(1, tentativas + 1):
+        try:
+            bruto = yf.Ticker(f"{ticker}.SA").history(
+                start=START, end=fim_exclusivo, auto_adjust=False, actions=False
+            )
+            if not bruto.empty:
+                return bruto
+            erro = "retorno vazio"
+        except Exception as exc:
+            erro = str(exc)
+        time.sleep(2 * n)  # espera e tenta de novo
+    raise RuntimeError(f"{ticker}: falha na extração ({erro})")
+
