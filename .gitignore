@@ -1,0 +1,18 @@
+# Segredos (NUNCA versionar)
+.streamlit/secrets.toml
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Dados locais gerados (reproduzíveis via scripts/load_data.py)
+data/*.db
+data/*.sqlite
+
+# IDE / SO
+.vscode/
+.idea/
+.DS_Store
