@@ -6,10 +6,15 @@ import tomllib
 from pathlib import Path
 from typing import Mapping
 
+import warnings
+
 import pandas as pd
 import yfinance as yf
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL, Engine
+
+warnings.filterwarnings("ignore", message=".*inplace keyword.*")  # avisos internos do yfinance
+warnings.filterwarnings("ignore", message=".*dayofweek.*")
 
 # 1) CONFIGURAÇÕES GERAIS
 
@@ -22,7 +27,7 @@ START, END = "2019-12-30", "2025-12-30"
 ATIVOS = {
     "WEGE3": ("WEG", "Bens de Capital"),
     "EGIE3": ("Engie Brasil Energia", "Energia Elétrica"),
-    "CASN4": ("Casan", "Saneamento"),
+    # "CASN4": ("Casan", "Saneamento"), ações excluídas: sem histórico no Yahoo Finance (liquidez ~zero)
     "INTB3": ("Intelbras", "Tecnologia"),
     "SHUL4": ("Schulz", "Bens de Capital"),
     "TUPY3": ("Tupy", "Autopeças / Metalurgia"),
