@@ -1,4 +1,3 @@
-"""Data App – Análise Técnica e Performance de Ações Catarinenses (B3)."""
 from __future__ import annotations
 
 import numpy as np
@@ -28,15 +27,14 @@ st.markdown("""
 
 DIAS_UTEIS = 252
 TEMPLATE = "plotly_white"
-RF_PADRAO = 10.0  # % a.a. – aproximação do CDI médio do período; ajustável na barra lateral
+RF_PADRAO = 10.0  # % a.a. – aproximação do CDI médio do período, podendo ser ajustado na barra lateral
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # 1) ACESSO A DADOS (resiliente + cache)
-# ──────────────────────────────────────────────────────────────────────────────
+
 @st.cache_data(ttl=3600, show_spinner="Conectando à base de dados…")
 def carregar_base(pg_cfg: dict | None):
-    """PostgreSQL (nuvem) → SQLite local → reconstrução via yfinance."""
+    
     avisos: list[str] = []
 
     if pg_cfg:
@@ -45,7 +43,7 @@ def carregar_base(pg_cfg: dict | None):
             df = etl.ler_cotacoes(eng)
             if not df.empty:
                 return df, etl.ler_meta(eng), "PostgreSQL (nuvem)", avisos
-            avisos.append("PostgreSQL conectado, porém sem dados (rode scripts/load_data.py).")
+            avisos.append("PostgreSQL conectado, porém sem dados (rode python etl.py --postgres).")
         except Exception as exc:  # nunca expõe credenciais na mensagem
             avisos.append(f"PostgreSQL indisponível ({type(exc).__name__}). Usando contingência local.")
 
@@ -70,9 +68,8 @@ def ler_pg_cfg() -> dict | None:
         return None
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# 2) TRANSFORMAÇÕES E MÉTRICAS (cacheadas)
-# ──────────────────────────────────────────────────────────────────────────────
+# 2) TRANSFORMAÇÕES E MÉTRICAS 
+
 @st.cache_data(show_spinner=False)
 def filtrar(df: pd.DataFrame, tickers: tuple, d0: pd.Timestamp, d1: pd.Timestamp) -> pd.DataFrame:
     out = df[df["ticker"].isin(tickers) & df["data"].between(d0, d1)].sort_values(["ticker", "data"]).copy()
@@ -85,7 +82,7 @@ def filtrar(df: pd.DataFrame, tickers: tuple, d0: pd.Timestamp, d1: pd.Timestamp
 
 @st.cache_data(show_spinner=False)
 def calcular_metricas(df: pd.DataFrame, rf: float) -> pd.DataFrame:
-    """rf em decimal a.a. Sharpe = (retorno anualizado − rf) / volatilidade anualizada."""
+    
     linhas = []
     for t, g in df.groupby("ticker"):
         g = g.sort_values("data")
@@ -149,23 +146,22 @@ def pct(x: float, casas: int = 1) -> str:
 
 
 def brl(x: float) -> str:
-    return _br(f"R$ {x:,.0f}")
+    return _br(f"R\\$ {x:,.0f}")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # 3) ESTADO DE SESSÃO E CARGA
-# ──────────────────────────────────────────────────────────────────────────────
+
 try:
     base, meta, fonte, avisos = carregar_base(ler_pg_cfg())
 except Exception as exc:
     st.error(
-        "Não foi possível carregar os dados. Execute `python scripts/load_data.py` "
+        "Não foi possível carregar os dados. Execute `python etl.py` "
         f"para gerar a base local. Detalhe: {type(exc).__name__}"
     )
     st.stop()
 
 if base.empty:
-    st.error("A base está vazia. Execute `python scripts/load_data.py`.")
+    st.error("A base está vazia. Execute `python etl.py`.")
     st.stop()
 
 TODOS = sorted(base["ticker"].unique())
@@ -182,9 +178,9 @@ def resetar_filtros() -> None:
 if "sel_tickers" not in st.session_state:
     resetar_filtros()
 
-# ──────────────────────────────────────────────────────────────────────────────
+
 # 4) BARRA LATERAL – FILTROS REATIVOS
-# ──────────────────────────────────────────────────────────────────────────────
+
 with st.sidebar:
     st.header("🎛️ Filtros")
     st.multiselect("Ativos", TODOS, key="sel_tickers", help="Empresas catarinenses listadas na B3.")
@@ -218,21 +214,37 @@ if met.empty:
     st.warning("Sem dados suficientes para o filtro escolhido.")
     st.stop()
 
-# ──────────────────────────────────────────────────────────────────────────────
+
 # 5) CABEÇALHO + KPIs
-# ──────────────────────────────────────────────────────────────────────────────
+
 st.title("📈 Ações Catarinenses na B3")
 st.caption(
     f"Análise técnica e de performance · {d0:%d/%m/%Y} a {d1:%d/%m/%Y} · "
     f"{len(tickers)} ativo(s) · Fechamento Ajustado (proventos e desdobramentos)"
 )
-
+st.caption("🖨️ Para gerar PDF da aba atual: Ctrl+P (Cmd+P no Mac) → Destino: 'Salvar como PDF'.")
 melhor = met.loc[met["ret_acum"].idxmax()]
 pior = met.loc[met["ret_acum"].idxmin()]
-k1, k2, k3, k4 = st.columns(4)
-k1.metric("Retorno Médio da Carteira", pct(met["ret_acum"].mean()), help="Média simples (pesos iguais) do retorno acumulado dos ativos selecionados.")
-k2.metric("Ativo Destaque", melhor["ticker"], f"{melhor['ret_acum'] * 100:+.1f}%".replace(".", ","))
-k3.metric("Ativo de Menor Performance", pior["ticker"], f"{pior['ret_acum'] * 100:+.1f}%".replace(".", ","))
+if len(met) > 1:
+    k1, k2, k3, k4 = st.columns(4)
+else:
+    k1, k4 = st.columns(2)
+
+k1.metric(
+    "Retorno Médio da Carteira", pct(met["ret_acum"].mean()),
+    help="Média simples (pesos iguais) do retorno acumulado dos ativos selecionados.",
+)
+if len(met) > 1:
+    k2.metric(
+        "Ativo Destaque", melhor["ticker"], f"{melhor['ret_acum'] * 100:+.1f}%".replace(".", ","),
+        help="Ativo com o maior retorno acumulado no período. Com apenas um ativo selecionado, "
+             "este comparativo não se aplica e o cartão não é exibido.",
+    )
+    k3.metric(
+        "Ativo de Menor Performance", pior["ticker"], f"{pior['ret_acum'] * 100:+.1f}%".replace(".", ","),
+        help="Ativo com o menor retorno acumulado no período. Com apenas um ativo selecionado, "
+             "este comparativo não se aplica e o cartão não é exibido.",
+    )
 k4.metric("Volatilidade Anualizada Média", pct(met["vol_anual"].mean()) + " a.a.")
 
 tardios = met[met["inicio"] > d0 + pd.Timedelta(days=10)]
@@ -240,9 +252,9 @@ if not tardios.empty:
     txt = ", ".join(f"{r.ticker} ({r.inicio:%d/%m/%Y})" for r in tardios.itertuples())
     st.caption(f"ℹ️ Ativos com histórico iniciado após o começo do período (Base 100 parte da 1ª cotação disponível): {txt}.")
 
-# ──────────────────────────────────────────────────────────────────────────────
+
 # 6) ABAS
-# ──────────────────────────────────────────────────────────────────────────────
+
 aba1, aba2, aba3, aba4, aba5, aba6 = st.tabs(
     ["📊 Rentabilidade", "⚖️ Risco x Retorno", "📉 Distribuição", "🕳️ Drawdown", "📈 Tendência (SMA)", "🗄️ Dados"]
 )
@@ -251,11 +263,16 @@ aba1, aba2, aba3, aba4, aba5, aba6 = st.tabs(
 with aba1:
     st.subheader("Rentabilidade comparativa normalizada (Base 100)")
     top = met.sort_values("ret_acum", ascending=False).iloc[0]
-    st.info(
-        f"R$ 100 investidos no início do período em **{top['ticker']}** teriam virado "
-        f"**{brl(100 * (1 + top['ret_acum']))}**; o pior resultado foi de **{pior['ticker']}** "
-        f"({brl(100 * (1 + pior['ret_acum']))})."
+    texto = (
+        f"R\\$ 100 investidos no início do período em **{top['ticker']}** teriam se transformado em "
+        f"**{brl(100 * (1 + top['ret_acum']))}**."
     )
+    if len(met) > 1:
+        texto += (
+            f"\n\nO pior resultado foi do ativo **{pior['ticker']}**: "
+            f"**{brl(100 * (1 + pior['ret_acum']))}**."
+        )
+    st.info(texto)
     fig = px.line(
         df, x="data", y="base100", color="ticker", color_discrete_map=CORES,
         labels={"data": "Data", "base100": "Base 100", "ticker": "Ativo"}, template=TEMPLATE,
@@ -281,12 +298,15 @@ with aba1:
 
 # ── Aba 2: Risco x Retorno ────────────────────────────────────────────────────
 with aba2:
-    st.subheader("Risco x Retorno e Índice de Sharpe")
+    st.subheader(
+        "Risco x Retorno e Índice de Sharpe",
+        help=f"Sharpe = (retorno anualizado − {st.session_state.rf_pct:.1f}% a.a.) ÷ volatilidade anualizada.",
+    )
     rank = met.dropna(subset=["sharpe"]).sort_values("sharpe", ascending=False)
     if not rank.empty:
         st.info(
-            f"Melhor relação retorno/risco: **{rank.iloc[0]['ticker']}** (Sharpe {rank.iloc[0]['sharpe']:.2f}). "
-            f"Sharpe = (retorno anualizado − {st.session_state.rf_pct:.1f}% a.a.) ÷ volatilidade anualizada."
+            f"Melhor relação retorno/risco: **{rank.iloc[0]['ticker']}** (Sharpe {rank.iloc[0]['sharpe']:.2f}) "
+            
         )
     plot = met.assign(vol_pct=met["vol_anual"] * 100, ret_pct=met["ret_acum"] * 100)
     c1, c2 = st.columns([3, 2])
@@ -302,7 +322,7 @@ with aba2:
         fig.add_hline(y=0, line_dash="dot", line_color="gray")
         fig.update_layout(height=500, showlegend=False)
         st.plotly_chart(fig, width="stretch")
-        st.caption("Tamanho da bolha = volume financeiro médio diário (volume × fechamento).")
+        st.caption("O tamanho da bolha reflete o volume financeiro médio diário (volume × fechamento).")
     with c2:
         fig = px.bar(
             rank.sort_values("sharpe"), x="sharpe", y="ticker", orientation="h", color="ticker",
@@ -335,8 +355,9 @@ with aba3:
         mais_risco = est.loc[est["CVaR 95% (%)"].idxmin()]
         st.info(
             f"Maior risco de cauda: **{mais_risco['Ativo']}** — nos 5% piores dias a perda média foi de "
-            f"{mais_risco['CVaR 95% (%)']:.2f}% (CVaR 95%). Curtose positiva indica caudas mais pesadas que a normal; "
-            "assimetria negativa indica perdas extremas mais frequentes que ganhos extremos."
+            f"{mais_risco['CVaR 95% (%)']:.2f}% (CVaR 95%).\n\n"
+            "Curtose positiva indica caudas mais pesadas que a normal, ou seja, outliers são mais frequentes do que o esperado.\n\n"
+            "Assimetria negativa indica que perdas extremas são mais frequentes que ganhos extremos."
         )
         st.dataframe(est.set_index("Ativo").round(2), width="stretch")
 
@@ -346,8 +367,8 @@ with aba4:
     resiliente = met.loc[met["max_dd"].idxmax()]
     vulneravel = met.loc[met["max_dd"].idxmin()]
     st.info(
-        f"Mais resiliente: **{resiliente['ticker']}** (drawdown máx. {resiliente['max_dd'] * 100:.1f}%). "
-        f"Maior queda: **{vulneravel['ticker']}** ({vulneravel['max_dd'] * 100:.1f}% em {vulneravel['data_max_dd']:%d/%m/%Y})."
+        f"Ativo mais resiliente: **{resiliente['ticker']}** (drawdown máx.: {resiliente['max_dd'] * 100:.1f}%).\n\n"
+        f"Ativo com maior queda: **{vulneravel['ticker']}** ({vulneravel['max_dd'] * 100:.1f}% em {vulneravel['data_max_dd']:%d/%m/%Y})."
     )
     dd_plot = df.assign(dd_pct=df["drawdown"] * 100)
     fig = px.area(
@@ -398,7 +419,9 @@ with aba5:
         s3.metric("vs SMA 50", f"{(u['Fechamento Ajustado'] / u['SMA 50'] - 1) * 100:+.1f}%")
         acima = (h["Fechamento Ajustado"] > h["SMA 50"])[h["SMA 50"].notna()].mean()
         tendencia = "alta (SMA 21 > SMA 50)" if u["SMA 21"] > u["SMA 50"] else "baixa (SMA 21 < SMA 50)"
-        st.info(f"Cruzamento atual indica tendência de **{tendencia}**. O preço ficou acima da SMA 50 em **{acima * 100:.0f}%** dos pregões do período.")
+        st.info(
+            f"Quanto maior a SMA, mais forte é a tendência de alta.\n\n"
+            f"Cruzamento atual indica tendência de **{tendencia}**. O preço ficou acima da SMA 50 em **{acima * 100:.0f}%** dos pregões do período.")
 
 # ── Aba 6: Dados ──────────────────────────────────────────────────────────────
 with aba6:
@@ -428,5 +451,3 @@ with aba6:
 
 st.divider()
 st.caption("Fonte: Yahoo Finance (yfinance, sufixo .SA) · Material educacional, não constitui recomendação de investimento.")
-
-st.caption("🖨️ Para gerar PDF da aba atual: Ctrl+P (Cmd+P no Mac) → Destino: 'Salvar como PDF'.")
